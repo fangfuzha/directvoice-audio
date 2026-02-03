@@ -1,0 +1,34 @@
+[package]
+name = "audio_io"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+# 音频I/O
+cpal = "0.15"
+# 异步运行时
+tokio = { version = "1.48.0", features = [
+  "sync",
+  "macros",
+  "rt-multi-thread",
+  "time",
+  "signal",
+  "io-std",
+  "io-util",
+] }
+# 日志
+log = "0.4"
+# 音频重采样
+rubato = "0.15"
+# 环形缓冲区
+ringbuf = "0.4.8"
+# 指令集优化
+pulp = "0.22.2"
+env_logger = "0.11"
+
+[profile.release]
+opt-level = 3     # 最高优化级别
+lto = "fat"       # 完整链接时优化
+codegen-units = 1 # 单个代码生成单元,更好的优化
+panic = "abort"   # panic 时直接中止,减少二进制大小
+strip = true      # 去除调试符号
