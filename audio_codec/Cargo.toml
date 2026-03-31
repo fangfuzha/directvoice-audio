@@ -17,3 +17,10 @@ audio_io = { path = "../audio_io" }
 # 环境日志
 env_logger = "0.11"
 parking_lot = "0.12.5"
+
+[profile.release]
+opt-level = 3     # 最高优化级别
+lto = "fat"       # 完整链接时优化
+codegen-units = 1 # 单个代码生成单元,更好的优化
+panic = "abort"   # panic 时直接中止,减少二进制大小
+strip = true      # 去除调试符号
