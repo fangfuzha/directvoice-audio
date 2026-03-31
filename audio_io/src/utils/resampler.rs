@@ -1,12 +1,10 @@
 //! 音频重采样工具
 //!
 //! 提供采集端和播放端共享的音频重采样功能
-
 use rubato::{
     Resampler, SincFixedIn, SincInterpolationParameters, SincInterpolationType, WindowFunction,
 };
 use std::sync::{Arc, Mutex};
-
 /// 创建音频重采样器
 ///
 /// 当实际采样率与目标采样率不同时，创建重采样器进行音频重采样。
@@ -45,7 +43,6 @@ pub fn create_resampler(
         // 采样率相同，不需要重采样
         return Ok(None);
     }
-
     // 配置 Sinc 插值参数
     let params = SincInterpolationParameters {
         sinc_len: 256,
@@ -54,7 +51,6 @@ pub fn create_resampler(
         oversampling_factor: 256,
         window: WindowFunction::BlackmanHarris2,
     };
-
     // 创建重采样器
     // 参数：比率、最大比率变化、插值参数、块大小、声道数
     let resampler = SincFixedIn::<f32>::new(
@@ -65,10 +61,8 @@ pub fn create_resampler(
         1,    // 单声道
     )
     .map_err(|e| format!("创建重采样器失败: {:?}", e))?;
-
     Ok(Some(Arc::new(Mutex::new(resampler))))
 }
-
 /// 对音频数据进行重采样
 ///
 /// 使用提供的重采样器对音频数据进行重采样处理。

@@ -1,16 +1,8 @@
-use log::info;
-
-#[cfg(feature = "mixer")]
-use log::error;
-#[cfg(feature = "mixer")]
+use audio_io::{AudioPlayback, AudioPlaybackControl};
+use log::{error, info};
 use std::f32::consts::TAU;
-#[cfg(feature = "mixer")]
 use std::time::Duration;
 
-#[cfg(feature = "mixer")]
-use audio_io::{AudioPlayback, AudioPlaybackControl};
-
-#[cfg(feature = "mixer")]
 async fn run() -> Result<(), String> {
     let sample_rate: u32 = 48_000;
     let frame_size: usize = 480;
@@ -19,7 +11,6 @@ async fn run() -> Result<(), String> {
         .sample_rate(sample_rate)
         .frame_size(frame_size)
         .volume(0.2)
-        .enable_mixer(true)
         .build()?;
 
     info!("播放设备: {}", playback.current_device_name());
@@ -41,7 +32,6 @@ async fn run() -> Result<(), String> {
     Ok(())
 }
 
-#[cfg(feature = "mixer")]
 async fn spawn_tone_source(
     source: audio_io::AudioMixerSource,
     frequency: f32,
@@ -71,7 +61,6 @@ async fn spawn_tone_source(
     }
 }
 
-#[cfg(feature = "mixer")]
 #[tokio::main]
 async fn main() -> Result<(), String> {
     env_logger::Builder::from_default_env()
@@ -80,21 +69,6 @@ async fn main() -> Result<(), String> {
         .init();
 
     info!("=== 多路播放示例启动 ===");
-    info!("当前已启用 mixer 特性，按 Ctrl+C 停止程序");
+    info!("按 Ctrl+C 停止程序");
     run().await
-}
-
-#[cfg(not(feature = "mixer"))]
-#[tokio::main]
-async fn main() -> Result<(), String> {
-    env_logger::Builder::from_default_env()
-        .filter_level(log::LevelFilter::Info)
-        .format_timestamp_millis()
-        .init();
-
-    info!("=== 多路播放示例 ===");
-    info!(
-        "该示例需要启用 mixer 特性才能运行: cargo run -p audio_io --example multi_playback --features mixer"
-    );
-    Ok(())
 }

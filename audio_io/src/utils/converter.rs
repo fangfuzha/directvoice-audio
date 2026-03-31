@@ -1,16 +1,12 @@
 //! 音频采样转换工具
 //!
 //! 提供不同采样格式（f32, i16, u16）到单声道 f32 的转换功能。
-
 use std::sync::LazyLock;
-
 // 音频处理常量
 const I16_NORMALIZATION_FACTOR: f32 = 32768.0;
 const U16_OFFSET: f32 = 32768.0;
-
 /// 全局 SIMD 架构检测实例
 static SIMD_ARCH: LazyLock<pulp::Arch> = LazyLock::new(pulp::Arch::new);
-
 /// 音频数据转换 trait
 pub trait AudioSampleConverter {
     /// 将音频数据转换为 `单声道` `f32` 格式
@@ -23,18 +19,15 @@ pub trait AudioSampleConverter {
     /// `单声道` `f32` 数据
     fn convert_to_mono_f32(&self, channels: usize) -> Vec<f32>;
 }
-
 impl AudioSampleConverter for [f32] {
     fn convert_to_mono_f32(&self, channels: usize) -> Vec<f32> {
         if channels == 1 {
             return self.to_vec();
         }
-
         let frame_count = self.len() / channels;
         let mut output = Vec::with_capacity(frame_count);
         // 安全地设置长度，因为我们马上就会填充它
         unsafe { output.set_len(frame_count) };
-
         SIMD_ARCH.dispatch(|| match channels {
             2 => {
                 for (out, frame) in output.iter_mut().zip(self.chunks_exact(2)) {
@@ -48,17 +41,14 @@ impl AudioSampleConverter for [f32] {
                 }
             }
         });
-
         output
     }
 }
-
 impl AudioSampleConverter for [i16] {
     fn convert_to_mono_f32(&self, channels: usize) -> Vec<f32> {
         let frame_count = self.len() / channels;
         let mut output = Vec::with_capacity(frame_count);
         unsafe { output.set_len(frame_count) };
-
         SIMD_ARCH.dispatch(|| match channels {
             1 => {
                 let inv_norm = 1.0 / I16_NORMALIZATION_FACTOR;
@@ -80,17 +70,14 @@ impl AudioSampleConverter for [i16] {
                 }
             }
         });
-
         output
     }
 }
-
 impl AudioSampleConverter for [u16] {
     fn convert_to_mono_f32(&self, channels: usize) -> Vec<f32> {
         let frame_count = self.len() / channels;
         let mut output = Vec::with_capacity(frame_count);
         unsafe { output.set_len(frame_count) };
-
         SIMD_ARCH.dispatch(|| match channels {
             1 => {
                 let inv_offset = 1.0 / U16_OFFSET;
@@ -114,16 +101,13 @@ impl AudioSampleConverter for [u16] {
                 }
             }
         });
-
         output
     }
 }
-
 // 音频输出常量
 const I16_OUT_MAX: f32 = 32767.0;
 const U16_OUT_OFFSET: u16 = 32768;
 const U16_OUT_SCALE: f32 = 32767.0;
-
 /// 音频输出数据转换 trait
 pub trait AudioOutputConverter {
     /// f32 缓冲区的数据经过`格式转换`&&`音量控制`&&`声道复制`后写入目标缓冲区
@@ -135,11 +119,9 @@ pub trait AudioOutputConverter {
     ///
     /// 返回消耗的源样本数（单声道样本数）
     fn write_samples(&mut self, source: &[f32], volume: f32, channels: usize) -> usize;
-
     /// 填充静音值
     fn fill_silence(&mut self);
 }
-
 impl AudioOutputConverter for [f32] {
     fn write_samples(&mut self, source: &[f32], volume: f32, channels: usize) -> usize {
         let consumed = (self.len() / channels).min(source.len());
@@ -148,7 +130,6 @@ impl AudioOutputConverter for [f32] {
         }
         let target = &mut self[..consumed * channels];
         let source = &source[..consumed];
-
         SIMD_ARCH.dispatch(|| match channels {
             1 => {
                 for (t, s) in target.iter_mut().zip(source.iter()) {
@@ -171,12 +152,10 @@ impl AudioOutputConverter for [f32] {
         });
         consumed
     }
-
     fn fill_silence(&mut self) {
         self.fill(0.0);
     }
 }
-
 impl AudioOutputConverter for [i16] {
     fn write_samples(&mut self, source: &[f32], volume: f32, channels: usize) -> usize {
         let consumed = (self.len() / channels).min(source.len());
@@ -185,7 +164,6 @@ impl AudioOutputConverter for [i16] {
         }
         let target = &mut self[..consumed * channels];
         let source = &source[..consumed];
-
         SIMD_ARCH.dispatch(|| match channels {
             1 => {
                 for (t, s) in target.iter_mut().zip(source.iter()) {
@@ -208,12 +186,10 @@ impl AudioOutputConverter for [i16] {
         });
         consumed
     }
-
     fn fill_silence(&mut self) {
         self.fill(0);
     }
 }
-
 impl AudioOutputConverter for [u16] {
     fn write_samples(&mut self, source: &[f32], volume: f32, channels: usize) -> usize {
         let consumed = (self.len() / channels).min(source.len());
@@ -222,7 +198,6 @@ impl AudioOutputConverter for [u16] {
         }
         let target = &mut self[..consumed * channels];
         let source = &source[..consumed];
-
         SIMD_ARCH.dispatch(|| match channels {
             1 => {
                 for (t, s) in target.iter_mut().zip(source.iter()) {
@@ -245,7 +220,6 @@ impl AudioOutputConverter for [u16] {
         });
         consumed
     }
-
     fn fill_silence(&mut self) {
         self.fill(U16_OUT_OFFSET);
     }

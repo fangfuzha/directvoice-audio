@@ -1,20 +1,15 @@
 //! 音频播放器构建器
-
 use crate::AudioPlayback;
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32};
-
 /// 音频播放器构建器
 pub struct AudioPlaybackBuilder {
     source_sample_rate: u32,
     frame_size: usize,
     volume: f32,
     muted: bool,
-    #[cfg(feature = "mixer")]
-    mixer_enabled: bool,
 }
-
 impl AudioPlaybackBuilder {
     /// 创建新的构建器
     pub fn new() -> Self {
@@ -23,11 +18,8 @@ impl AudioPlaybackBuilder {
             frame_size: 480,
             volume: 1.0,
             muted: false,
-            #[cfg(feature = "mixer")]
-            mixer_enabled: false,
         }
     }
-
     /// 设置采样率（Hz）
     ///
     /// # 参数
@@ -36,7 +28,6 @@ impl AudioPlaybackBuilder {
         self.source_sample_rate = sample_rate;
         self
     }
-
     /// 设置每帧样本数
     ///
     /// # 参数
@@ -45,7 +36,6 @@ impl AudioPlaybackBuilder {
         self.frame_size = frame_size;
         self
     }
-
     /// 设置播放音量 (0.0 - 1.0)
     ///
     /// # 参数
@@ -54,7 +44,6 @@ impl AudioPlaybackBuilder {
         self.volume = volume.clamp(0.0, 1.0);
         self
     }
-
     /// 设置静音状态
     ///
     /// # 参数
@@ -63,26 +52,15 @@ impl AudioPlaybackBuilder {
         self.muted = muted;
         self
     }
-
-    /// 启用或关闭内置多路混音
-    #[cfg(feature = "mixer")]
-    pub fn enable_mixer(mut self, enabled: bool) -> Self {
-        self.mixer_enabled = enabled;
-        self
-    }
-
     /// 构建音频播放器
     pub fn build(self) -> Result<AudioPlayback, String> {
         // 获取默认输出设备
         let device = crate::utils::get_host()
             .default_output_device()
             .ok_or_else(|| "未找到默认音频输出设备".to_string())?;
-
         log::debug!("使用音频输出设备: {}", device.name().unwrap_or_default());
-
         // 获取默认配置
         let config = crate::utils::default_output_config(&device)?;
-
         log::info!(
             "音频播放配置: 采样率={}Hz, 声道数={}, 缓冲区大小={:?}, 格式={:?}",
             config.sample_rate().0,
@@ -90,7 +68,6 @@ impl AudioPlaybackBuilder {
             config.buffer_size(),
             config.sample_format()
         );
-
         let actual_sample_rate = config.sample_rate().0;
         if actual_sample_rate != self.source_sample_rate {
             log::warn!(
@@ -99,7 +76,6 @@ impl AudioPlaybackBuilder {
                 actual_sample_rate
             );
         }
-
         Ok(AudioPlayback {
             device,
             state: crate::playback::PlaybackState::Stopped,
@@ -108,19 +84,11 @@ impl AudioPlaybackBuilder {
                 frame_size: self.frame_size,
                 volume: Arc::new(AtomicU32::new(self.volume.to_bits())),
                 muted: Arc::new(AtomicBool::new(self.muted)),
-                #[cfg(feature = "mixer")]
-                mixer_enabled: self.mixer_enabled,
             },
-            #[cfg(feature = "mixer")]
-            mixer: crate::mixer::PlaybackMixer::new(
-                self.mixer_enabled,
-                self.frame_size,
-                self.source_sample_rate,
-            ),
+            mixer: crate::mixer::PlaybackMixer::new(self.frame_size, self.source_sample_rate),
         })
     }
 }
-
 impl Default for AudioPlaybackBuilder {
     fn default() -> Self {
         Self::new()

@@ -1,22 +1,20 @@
 //! 音频混音模块
 //!
 //! 为播放端提供可选的多路输入混合能力，默认保持关闭，避免影响单路播放路径。
-
 use std::collections::{HashMap, VecDeque};
+use std::sync::Arc;
 use std::sync::Mutex;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::Duration;
-
 use tokio::sync::{broadcast, mpsc};
 use tokio::task::JoinHandle;
-use tokio::time::{interval, MissedTickBehavior};
+use tokio::time::{MissedTickBehavior, interval};
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub(crate) enum MixerCommand {
-    Submit {
-        source_id: usize,
-        frame: Vec<f32>,
-    },
+    Submit { source_id: usize, frame: Vec<f32> },
+    SetVolume { source_id: usize, volume: f32 },
+    SetMuted { source_id: usize, muted: bool },
 }
 
 /// 单个混音输入源
@@ -24,6 +22,8 @@ pub(crate) enum MixerCommand {
 pub struct AudioMixerSource {
     source_id: usize,
     command_tx: mpsc::Sender<MixerCommand>,
+    volume: Arc<Mutex<f32>>,
+    muted: Arc<Mutex<bool>>,
 }
 
 impl AudioMixerSource {
@@ -52,11 +52,88 @@ impl AudioMixerSource {
             })
             .map_err(|e| format!("发送混音数据失败: {e}"))
     }
+
+    /// 设置该通道的音量 (0.0-1.0)
+    pub async fn set_volume(&self, volume: f32) -> Result<(), String> {
+        let clamped = volume.clamp(0.0, 1.0);
+        *self
+            .volume
+            .lock()
+            .map_err(|_| "获取音量锁失败".to_string())? = clamped;
+        self.command_tx
+            .send(MixerCommand::SetVolume {
+                source_id: self.source_id,
+                volume: clamped,
+            })
+            .await
+            .map_err(|_| "混音器已停止".to_string())
+    }
+
+    /// 尝试立即设置该通道的音量 (0.0-1.0)
+    pub fn try_set_volume(&self, volume: f32) -> Result<(), String> {
+        let clamped = volume.clamp(0.0, 1.0);
+        *self
+            .volume
+            .lock()
+            .map_err(|_| "获取音量锁失败".to_string())? = clamped;
+        self.command_tx
+            .try_send(MixerCommand::SetVolume {
+                source_id: self.source_id,
+                volume: clamped,
+            })
+            .map_err(|e| format!("设置音量失败: {e}"))
+    }
+
+    /// 获取该通道当前的音量
+    pub fn get_volume(&self) -> Result<f32, String> {
+        let guard = self
+            .volume
+            .lock()
+            .map_err(|_| "获取音量锁失败".to_string())?;
+        Ok(*guard)
+    }
+
+    /// 设置该通道的静音状态
+    pub async fn set_muted(&self, muted: bool) -> Result<(), String> {
+        *self
+            .muted
+            .lock()
+            .map_err(|_| "获取静音锁失败".to_string())? = muted;
+        self.command_tx
+            .send(MixerCommand::SetMuted {
+                source_id: self.source_id,
+                muted,
+            })
+            .await
+            .map_err(|_| "混音器已停止".to_string())
+    }
+
+    /// 尝试立即设置该通道的静音状态
+    pub fn try_set_muted(&self, muted: bool) -> Result<(), String> {
+        *self
+            .muted
+            .lock()
+            .map_err(|_| "获取静音锁失败".to_string())? = muted;
+        self.command_tx
+            .try_send(MixerCommand::SetMuted {
+                source_id: self.source_id,
+                muted,
+            })
+            .map_err(|e| format!("设置静音失败: {e}"))
+    }
+
+    /// 获取该通道当前的静音状态
+    pub fn is_muted(&self) -> Result<bool, String> {
+        let guard = self
+            .muted
+            .lock()
+            .map_err(|_| "获取静音锁失败".to_string())?;
+        Ok(*guard)
+    }
 }
 
 /// 播放端内置混音控制器
 pub(crate) struct PlaybackMixer {
-    enabled: bool,
     frame_size: usize,
     source_sample_rate: u32,
     command_tx: Mutex<mpsc::Sender<MixerCommand>>,
@@ -66,11 +143,9 @@ pub(crate) struct PlaybackMixer {
 }
 
 impl PlaybackMixer {
-    pub(crate) fn new(enabled: bool, frame_size: usize, source_sample_rate: u32) -> Self {
+    pub(crate) fn new(frame_size: usize, source_sample_rate: u32) -> Self {
         let (command_tx, command_rx) = mpsc::channel(256);
-
         Self {
-            enabled,
             frame_size,
             source_sample_rate,
             command_tx: Mutex::new(command_tx),
@@ -80,33 +155,22 @@ impl PlaybackMixer {
         }
     }
 
-    pub(crate) fn is_enabled(&self) -> bool {
-        self.enabled
-    }
-
     pub(crate) fn create_source(&self) -> Result<AudioMixerSource, String> {
-        if !self.enabled {
-            return Err("混音功能未启用".to_string());
-        }
-
         let source_id = self.next_source_id.fetch_add(1, Ordering::Relaxed);
         let command_tx = self
             .command_tx
             .lock()
             .map_err(|_| "获取混音器发送端失败".to_string())?
             .clone();
-
         Ok(AudioMixerSource {
             source_id,
             command_tx,
+            volume: Arc::new(Mutex::new(1.0)),
+            muted: Arc::new(Mutex::new(false)),
         })
     }
 
     pub(crate) fn start(&self, output_tx: broadcast::Sender<Vec<f32>>) -> Result<(), String> {
-        if !self.enabled {
-            return Ok(());
-        }
-
         let mut task_guard = self
             .task
             .lock()
@@ -114,7 +178,6 @@ impl PlaybackMixer {
         if task_guard.is_some() {
             return Err("音频混音器已经在运行".to_string());
         }
-
         let mut command_rx_guard = self
             .command_rx
             .lock()
@@ -122,13 +185,11 @@ impl PlaybackMixer {
         let command_rx = command_rx_guard
             .take()
             .ok_or_else(|| "混音器通道未初始化".to_string())?;
-
         let frame_size = self.frame_size;
         let source_sample_rate = self.source_sample_rate;
         let handle = tokio::spawn(async move {
             run_mixer(command_rx, output_tx, frame_size, source_sample_rate).await;
         });
-
         *task_guard = Some(handle);
         Ok(())
     }
@@ -139,7 +200,6 @@ impl PlaybackMixer {
                 handle.abort();
             }
         }
-
         if let Ok(mut command_rx_guard) = self.command_rx.lock() {
             if command_rx_guard.is_none() {
                 let (command_tx, command_rx) = mpsc::channel(256);
@@ -162,6 +222,22 @@ impl Drop for PlaybackMixer {
     }
 }
 
+/// 源的状态信息
+#[derive(Debug, Clone)]
+struct SourceState {
+    volume: f32,
+    muted: bool,
+}
+
+impl Default for SourceState {
+    fn default() -> Self {
+        Self {
+            volume: 1.0,
+            muted: false,
+        }
+    }
+}
+
 async fn run_mixer(
     mut command_rx: mpsc::Receiver<MixerCommand>,
     output_tx: broadcast::Sender<Vec<f32>>,
@@ -171,8 +247,8 @@ async fn run_mixer(
     let tick_duration = frame_duration(frame_size, source_sample_rate);
     let mut ticker = interval(tick_duration);
     ticker.set_missed_tick_behavior(MissedTickBehavior::Skip);
-
     let mut pending: HashMap<usize, VecDeque<Vec<f32>>> = HashMap::new();
+    let mut source_states: HashMap<usize, SourceState> = HashMap::new();
     let mut command_closed = false;
 
     loop {
@@ -182,13 +258,19 @@ async fn run_mixer(
                     Some(MixerCommand::Submit { source_id, frame }) => {
                         pending.entry(source_id).or_default().push_back(normalize_frame(frame, frame_size));
                     }
+                    Some(MixerCommand::SetVolume { source_id, volume }) => {
+                        source_states.entry(source_id).or_default().volume = volume.clamp(0.0, 1.0);
+                    }
+                    Some(MixerCommand::SetMuted { source_id, muted }) => {
+                        source_states.entry(source_id).or_default().muted = muted;
+                    }
                     None => {
                         command_closed = true;
                     }
                 }
             }
             _ = ticker.tick() => {
-                if let Some(frame) = mix_next_frame(&mut pending, frame_size) {
+                if let Some(frame) = mix_next_frame(&mut pending, &source_states, frame_size) {
                     if output_tx.send(frame).is_err() {
                         break;
                     }
@@ -197,7 +279,6 @@ async fn run_mixer(
                 }
             }
         }
-
         if command_closed && pending.is_empty() {
             break;
         }
@@ -212,16 +293,18 @@ fn frame_duration(frame_size: usize, source_sample_rate: u32) -> Duration {
 
 fn mix_next_frame(
     pending: &mut HashMap<usize, VecDeque<Vec<f32>>>,
+    source_states: &HashMap<usize, SourceState>,
     frame_size: usize,
 ) -> Option<Vec<f32>> {
     let mut frames = Vec::new();
+    let mut source_ids = Vec::new();
     let mut empty_sources = Vec::new();
 
     for (source_id, queue) in pending.iter_mut() {
         if let Some(frame) = queue.pop_front() {
             frames.push(frame);
+            source_ids.push(*source_id);
         }
-
         if queue.is_empty() {
             empty_sources.push(*source_id);
         }
@@ -235,7 +318,7 @@ fn mix_next_frame(
         return None;
     }
 
-    Some(mix_frames(&frames, frame_size))
+    Some(mix_frames(&frames, &source_ids, source_states, frame_size))
 }
 
 fn normalize_frame(mut frame: Vec<f32>, frame_size: usize) -> Vec<f32> {
@@ -244,17 +327,29 @@ fn normalize_frame(mut frame: Vec<f32>, frame_size: usize) -> Vec<f32> {
         std::cmp::Ordering::Equal => {}
         std::cmp::Ordering::Greater => frame.truncate(frame_size),
     }
-
     frame
 }
 
-fn mix_frames(frames: &[Vec<f32>], frame_size: usize) -> Vec<f32> {
+fn mix_frames(
+    frames: &[Vec<f32>],
+    source_ids: &[usize],
+    source_states: &HashMap<usize, SourceState>,
+    frame_size: usize,
+) -> Vec<f32> {
     let mut mixed = vec![0.0; frame_size];
 
-    for frame in frames {
+    for (frame_idx, frame) in frames.iter().enumerate() {
+        let source_id = source_ids.get(frame_idx).copied().unwrap_or(0);
+        let state = source_states.get(&source_id).cloned().unwrap_or_default();
+
+        // 跳过静音的源
+        if state.muted {
+            continue;
+        }
+
         let limit = frame.len().min(frame_size);
-        for idx in 0..limit {
-            mixed[idx] += frame[idx];
+        for sample_idx in 0..limit {
+            mixed[sample_idx] += frame[sample_idx] * state.volume;
         }
     }
 
@@ -268,20 +363,68 @@ fn mix_frames(frames: &[Vec<f32>], frame_size: usize) -> Vec<f32> {
 
 #[cfg(test)]
 mod tests {
-    use super::{mix_frames, normalize_frame};
+    use super::{SourceState, mix_frames, normalize_frame};
+    use std::collections::HashMap;
 
     #[test]
     fn test_normalize_frame_pads_and_truncates() {
         let padded = normalize_frame(vec![1.0, 2.0], 4);
         assert_eq!(padded, vec![1.0, 2.0, 0.0, 0.0]);
-
         let truncated = normalize_frame(vec![1.0, 2.0, 3.0, 4.0], 2);
         assert_eq!(truncated, vec![1.0, 2.0]);
     }
 
     #[test]
     fn test_mix_frames_averages_sources() {
-        let mixed = mix_frames(&[vec![1.0, 0.5], vec![0.5, -0.5]], 2);
+        let mut states = HashMap::new();
+        states.insert(0, SourceState::default());
+        states.insert(1, SourceState::default());
+
+        let mixed = mix_frames(&[vec![1.0, 0.5], vec![0.5, -0.5]], &[0, 1], &states, 2);
         assert_eq!(mixed, vec![0.75, 0.0]);
+    }
+
+    #[test]
+    fn test_mix_frames_with_volume() {
+        let mut states = HashMap::new();
+        states.insert(
+            0,
+            SourceState {
+                volume: 0.5,
+                muted: false,
+            },
+        );
+        states.insert(
+            1,
+            SourceState {
+                volume: 0.5,
+                muted: false,
+            },
+        );
+
+        let mixed = mix_frames(&[vec![1.0, 1.0], vec![1.0, 1.0]], &[0, 1], &states, 2);
+        assert_eq!(mixed, vec![0.5, 0.5]);
+    }
+
+    #[test]
+    fn test_mix_frames_with_mute() {
+        let mut states = HashMap::new();
+        states.insert(
+            0,
+            SourceState {
+                volume: 1.0,
+                muted: true,
+            },
+        );
+        states.insert(
+            1,
+            SourceState {
+                volume: 1.0,
+                muted: false,
+            },
+        );
+
+        let mixed = mix_frames(&[vec![1.0, 1.0], vec![1.0, 1.0]], &[0, 1], &states, 2);
+        assert_eq!(mixed, vec![0.5, 0.5]);
     }
 }

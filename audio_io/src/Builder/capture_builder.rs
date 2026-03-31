@@ -1,10 +1,8 @@
 //! 音频采集器构建器
-
 use crate::AudioCapture;
 use cpal::traits::{DeviceTrait, HostTrait};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32};
-
 /// 音频采集器构建器
 pub struct AudioCaptureBuilder {
     target_sample_rate: u32,
@@ -12,7 +10,6 @@ pub struct AudioCaptureBuilder {
     volume: f32,
     muted: bool,
 }
-
 impl AudioCaptureBuilder {
     /// 创建新的构建器
     pub fn new() -> Self {
@@ -23,7 +20,6 @@ impl AudioCaptureBuilder {
             muted: false,
         }
     }
-
     /// 设置采样率（Hz）
     ///
     /// # 参数
@@ -32,7 +28,6 @@ impl AudioCaptureBuilder {
         self.target_sample_rate = sample_rate;
         self
     }
-
     /// 设置每帧样本数
     ///
     /// # 参数
@@ -41,7 +36,6 @@ impl AudioCaptureBuilder {
         self.frame_size = frame_size;
         self
     }
-
     /// 设置采集音量 (0.0 - 1.0)
     ///
     /// # 参数
@@ -50,7 +44,6 @@ impl AudioCaptureBuilder {
         self.volume = volume.clamp(0.0, 1.0);
         self
     }
-
     /// 设置静音状态
     ///
     /// # 参数
@@ -59,7 +52,6 @@ impl AudioCaptureBuilder {
         self.muted = muted;
         self
     }
-
     /// 构建音频采集器
     pub fn build(self) -> Result<AudioCapture, String> {
         // 获取音频采集设备
@@ -67,7 +59,6 @@ impl AudioCaptureBuilder {
             .default_input_device()
             .ok_or_else(|| "未找到默认音频输入设备".to_string())?;
         log::debug!("默认音频采集设备: {}", device.name().unwrap_or_default());
-
         // 获取设备支持的配置
         let config = crate::utils::default_input_config(&device)?;
         log::debug!(
@@ -77,7 +68,6 @@ impl AudioCaptureBuilder {
             config.buffer_size(),
             config.sample_format()
         );
-
         let actual_sample_rate = config.sample_rate().0;
         if actual_sample_rate != self.target_sample_rate {
             log::warn!(
@@ -86,7 +76,6 @@ impl AudioCaptureBuilder {
                 actual_sample_rate
             );
         }
-
         Ok(AudioCapture {
             device,
             state: crate::capture::CaptureState::Idle,
@@ -99,7 +88,6 @@ impl AudioCaptureBuilder {
         })
     }
 }
-
 impl Default for AudioCaptureBuilder {
     fn default() -> Self {
         Self::new()

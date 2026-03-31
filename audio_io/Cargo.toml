@@ -28,7 +28,7 @@ env_logger = "0.11"
 
 [features]
 default = []
-mixer = []
+
 
 [profile.release]
 opt-level = 3     # 最高优化级别
