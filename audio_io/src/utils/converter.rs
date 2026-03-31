@@ -18,7 +18,7 @@ pub trait AudioSampleConverter {
     /// # 参数
     /// - `channels`: 源音频数据的声道数（如 1 为单声道，2 为双声道）。
     ///   如果是多声道，则会将各声道数据取平均值合并为单声道。
-    /// 
+    ///
     /// # 返回
     /// `单声道` `f32` 数据
     fn convert_to_mono_f32(&self, channels: usize) -> Vec<f32>;

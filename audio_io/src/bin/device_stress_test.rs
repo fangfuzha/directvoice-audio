@@ -1,6 +1,7 @@
-//! 设备频繁切换压力测试
+//! 输入+输出设备频繁切换压力测试
 //!
-//! 自动在可用音频设备之间频繁切换，测试是否存在内存泄漏或其他资源问题
+//! 自动在可用输入/输出设备间循环切换，并执行采集->播放回环，检查在高频切换下的资源稳定性与内存行为。
+//! 用于验证双向切换场景下的端到端性能。
 
 use audio_io::{AudioCapture, AudioCaptureControl, AudioPlayback, AudioPlaybackControl};
 use log::{error, info, warn};

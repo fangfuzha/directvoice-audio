@@ -11,6 +11,8 @@ pub struct AudioPlaybackBuilder {
     frame_size: usize,
     volume: f32,
     muted: bool,
+    #[cfg(feature = "mixer")]
+    mixer_enabled: bool,
 }
 
 impl AudioPlaybackBuilder {
@@ -21,6 +23,8 @@ impl AudioPlaybackBuilder {
             frame_size: 480,
             volume: 1.0,
             muted: false,
+            #[cfg(feature = "mixer")]
+            mixer_enabled: false,
         }
     }
 
@@ -57,6 +61,13 @@ impl AudioPlaybackBuilder {
     /// - `muted`: 是否静音
     pub fn mute(mut self, muted: bool) -> Self {
         self.muted = muted;
+        self
+    }
+
+    /// 启用或关闭内置多路混音
+    #[cfg(feature = "mixer")]
+    pub fn enable_mixer(mut self, enabled: bool) -> Self {
+        self.mixer_enabled = enabled;
         self
     }
 
@@ -97,7 +108,15 @@ impl AudioPlaybackBuilder {
                 frame_size: self.frame_size,
                 volume: Arc::new(AtomicU32::new(self.volume.to_bits())),
                 muted: Arc::new(AtomicBool::new(self.muted)),
+                #[cfg(feature = "mixer")]
+                mixer_enabled: self.mixer_enabled,
             },
+            #[cfg(feature = "mixer")]
+            mixer: crate::mixer::PlaybackMixer::new(
+                self.mixer_enabled,
+                self.frame_size,
+                self.source_sample_rate,
+            ),
         })
     }
 }

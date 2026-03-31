@@ -1,6 +1,7 @@
-//! 音频设备切换工具
+//! 交互式音频设备切换工具
 //!
-//! 实时采集音频并直接播放（回环），支持动态切换输入/输出设备
+//! 通过命令行菜单手动选择输入/输出设备进行切换，支持实时采集->播放回环，用于功能验证与调试。
+//! 适合开发阶段对单次切换逻辑的探索与验证。
 
 use audio_io::{AudioCapture, AudioCaptureControl, AudioPlayback, AudioPlaybackControl};
 use std::io::{self, Write};

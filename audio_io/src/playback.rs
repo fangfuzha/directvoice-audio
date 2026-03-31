@@ -8,6 +8,11 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use tokio::sync::broadcast;
 
+#[cfg(feature = "mixer")]
+use crate::mixer::AudioMixerSource;
+#[cfg(feature = "mixer")]
+use crate::mixer::PlaybackMixer;
+
 use crate::stream::build_output_stream::AudioOutputStreamBuilder;
 use crate::traits::AudioPlaybackControl;
 
@@ -34,6 +39,9 @@ pub struct AudioPlaybackSettings {
     pub(crate) volume: Arc<AtomicU32>,
     /// 是否静音
     pub(crate) muted: Arc<AtomicBool>,
+    #[cfg(feature = "mixer")]
+    /// 是否启用内置混音
+    pub(crate) mixer_enabled: bool,
 }
 
 /// 音频播放器
@@ -44,6 +52,9 @@ pub struct AudioPlayback {
     pub(crate) state: PlaybackState,
     /// 播放设置
     pub(crate) settings: AudioPlaybackSettings,
+    #[cfg(feature = "mixer")]
+    /// 内置混音器
+    pub(crate) mixer: PlaybackMixer,
 }
 
 // ⚠️ 安全性说明：
@@ -89,6 +100,21 @@ impl AudioPlayback {
     pub fn frame_size(&self) -> usize {
         self.settings.frame_size
     }
+
+    #[cfg(feature = "mixer")]
+    /// 获取一个新的混音输入源
+    pub fn create_mixer_source(&self) -> Result<AudioMixerSource, String> {
+        if !self.mixer.is_enabled() {
+            return Err("混音功能未启用".to_string());
+        }
+        self.mixer.create_source()
+    }
+
+    #[cfg(feature = "mixer")]
+    /// 判断是否启用了内置混音
+    pub fn mixer_enabled(&self) -> bool {
+        self.settings.mixer_enabled
+    }
 }
 
 impl AudioPlaybackControl for AudioPlayback {
@@ -116,10 +142,19 @@ impl AudioPlaybackControl for AudioPlayback {
             receiver.resubscribe(),
         )?;
 
+        #[cfg(feature = "mixer")]
+        if self.mixer.is_enabled() {
+            self.mixer.start(sender.clone())?;
+        }
+
         // 启动音频流
-        stream
-            .play()
-            .map_err(|e| format!("启动音频流失败: {}", e))?;
+        if let Err(e) = stream.play().map_err(|e| format!("启动音频流失败: {}", e)) {
+            #[cfg(feature = "mixer")]
+            if self.settings.mixer_enabled {
+                self.mixer.stop();
+            }
+            return Err(e);
+        }
 
         // 保存发送端用于返回
         let sender_clone = sender.clone();
@@ -141,6 +176,10 @@ impl AudioPlaybackControl for AudioPlayback {
         }
         // 显式 drop 旧的 state，确保 Stream 等资源得到正确释放
         drop(std::mem::replace(&mut self.state, PlaybackState::Stopped));
+        #[cfg(feature = "mixer")]
+        if self.mixer.is_enabled() {
+            self.mixer.stop();
+        }
         log::debug!("音频播放已停止");
         return true;
     }

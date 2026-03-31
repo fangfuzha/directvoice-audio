@@ -26,6 +26,10 @@ ringbuf = "0.4.8"
 pulp = "0.22.2"
 env_logger = "0.11"
 
+[features]
+default = []
+mixer = []
+
 [profile.release]
 opt-level = 3     # 最高优化级别
 lto = "fat"       # 完整链接时优化

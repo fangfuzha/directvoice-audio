@@ -149,3 +149,10 @@ fn test_builder_full_config() {
     assert_eq!(playback.get_volume(), 0.7);
     assert!(!playback.is_muted());
 }
+
+#[cfg(feature = "mixer")]
+#[test]
+fn test_builder_enable_mixer() {
+    let playback = AudioPlayback::builder().enable_mixer(true).build().unwrap();
+    assert!(playback.mixer_enabled());
+}
